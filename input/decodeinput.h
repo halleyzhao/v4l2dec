@@ -22,12 +22,10 @@
 #ifndef decodeinput_h
 #define decodeinput_h
 
-#include <stdio.h>
-#include <string>
-#include "VideoDecoderDefs.h"
-#include "VideoDecoderInterface.h"
+#include <stdint.h>
+#include <assert.h>
+#include "util.h"
 
-using std::string;
 class DecodeInput {
 public:
     DecodeInput();
@@ -35,14 +33,13 @@ public:
     static DecodeInput * create(const char* fileName);
     virtual bool isEOS() = 0;
     virtual const char * getMimeType() = 0;
-    virtual bool getNextDecodeUnit(VideoDecodeBuffer &inputBuffer) = 0;
-    virtual const string& getCodecData() = 0;
-    virtual uint16_t getWidth() {return m_width;}
-    virtual uint16_t getHeight() {return m_height;}
+    virtual bool getNextDecodeUnit(uint8_t* &data, uint32_t &size, int64_t &timeStamp, uint32_t &flags) = 0;
+    virtual bool getCodecData(uint8_t* &data, uint32_t &size) = 0;
+    virtual bool getResolution(uint32_t &width, uint32_t &height);
 
 protected:
     virtual bool initInput(const char* fileName) = 0;
-    virtual void setResolution(const uint16_t width, const uint16_t height);
+    virtual void setResolution(uint32_t width, uint32_t height);
     uint16_t m_width;
     uint16_t m_height;
 

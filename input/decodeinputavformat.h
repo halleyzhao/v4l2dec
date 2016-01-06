@@ -25,6 +25,15 @@
 
 #include "decodeinput.h"
 extern "C" {
+#ifndef __STDC_FORMAT_MACROS
+#define __STDC_FORMAT_MACROS
+#endif
+#ifndef __STDC_CONSTANT_MACROS
+#define __STDC_CONSTANT_MACROS
+#endif
+#ifndef __STDC_LIMIT_MACROS
+#define __STDC_LIMIT_MACROS
+#endif
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #if LIBAVCODEC_VERSION_INT <= AV_VERSION_INT(54, 51, 100)
@@ -34,6 +43,7 @@ extern "C" {
     #define AV_CODEC_ID_H264   CODEC_ID_H264
 #endif
 }
+#include <vector>
 
 class DecodeInputAvFormat : public DecodeInput
 {
@@ -42,8 +52,8 @@ public:
     virtual ~DecodeInputAvFormat();
     virtual bool isEOS() { return m_isEos; }
     virtual const char * getMimeType();
-    virtual bool getNextDecodeUnit(VideoDecodeBuffer &inputBuffer);
-    virtual const string& getCodecData();
+    virtual bool getNextDecodeUnit(uint8_t* &data, uint32_t &size, int64_t &timeStamp, uint32_t &flags);
+    virtual bool getCodecData(uint8_t* &data, uint32_t &size);
 
 protected:
     virtual bool initInput(const char* fileName);
@@ -53,7 +63,7 @@ private:
     AVCodecID m_codecId;
     AVPacket m_packet;
     bool m_isEos;
-    string m_codecData;
+    std::vector<uint8_t> m_codecData;
 };
 
 #endif

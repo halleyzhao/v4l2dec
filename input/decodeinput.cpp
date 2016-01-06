@@ -23,17 +23,13 @@
 #include "config.h"
 #endif
 
-#include <string.h>
-#include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 #include "decodeinput.h"
-#include "common/log.h"
 
 #ifdef __ENABLE_AVFORMAT__
 #include "decodeinputavformat.h"
 #endif
-
-using namespace YamiMediaCodec;
 
 class MyDecodeInput : public DecodeInput{
 public:
@@ -44,7 +40,7 @@ public:
     bool initInput(const char* fileName);
     virtual bool isEOS() {return m_parseToEOS;}
     virtual bool init() = 0;
-    virtual const string& getCodecData();
+    virtual bool getCodecData(uint8_t* &data, uint32_t &size);
 protected:
     FILE *m_fp;
     uint8_t *m_buffer;
@@ -61,7 +57,7 @@ public:
     ~DecodeInputVPX();
     const char * getMimeType();
     bool init();
-    virtual bool getNextDecodeUnit(VideoDecodeBuffer &inputBuffer);
+    virtual bool getNextDecodeUnit(uint8_t* &data, uint32_t &size, int64_t &timeStamp, uint32_t &flags);
 private:
     const int m_ivfFrmHdrSize;
     const int m_maxFrameSize;
@@ -76,7 +72,7 @@ public:
     bool init();
     bool ensureBufferData();
     int32_t scanForStartCode(const uint8_t * data, uint32_t offset, uint32_t size);
-    bool getNextDecodeUnit(VideoDecodeBuffer &inputBuffer);
+    bool getNextDecodeUnit(uint8_t* &data, uint32_t &size, int64_t &timeStamp, uint32_t &flags);
     virtual bool isSyncWord(const uint8_t* buf) = 0;
 
 public:
@@ -126,11 +122,11 @@ DecodeInput* DecodeInput::create(const char* fileName)
         strcasecmp(ext,"avc")==0 ||
         strcasecmp(ext,"26l")==0 ||
         strcasecmp(ext,"jvt")==0 ) {
-        input = new DecodeInputH26x(YAMI_MIME_H264);
+        input = new DecodeInputH26x(MY_MIME_H264);
     } else if (strcasecmp(ext,"265") == 0 ||
                strcasecmp(ext,"h265") == 0 ||
                strcasecmp(ext,"bin") == 0 ) {
-        input = new DecodeInputH26x(YAMI_MIME_H265);
+        input = new DecodeInputH26x(MY_MIME_H265);
     } else if((strcasecmp(ext,"ivf")==0) ||
             (strcasecmp(ext,"vp8")==0) ||
             (strcasecmp(ext,"vp9")==0)) {
@@ -157,10 +153,19 @@ DecodeInput* DecodeInput::create(const char* fileName)
     return input;
 }
 
-void DecodeInput::setResolution(const uint16_t width, const uint16_t height)
+void DecodeInput::setResolution(uint32_t width, uint32_t height)
 {
-  m_width = width;
-  m_height = height;
+    m_width = width;
+    m_height = height;
+}
+
+bool DecodeInput::getResolution(uint32_t &width, uint32_t &height){
+    if (m_width <= 0 || m_height <= 0)
+        return false;
+
+    width = m_width;
+    height = m_height;
+    return true;
 }
 
 MyDecodeInput::MyDecodeInput()
@@ -192,11 +197,11 @@ bool MyDecodeInput::initInput(const char* fileName)
     return init();
 }
 
-const string& MyDecodeInput::getCodecData()
+bool MyDecodeInput::getCodecData(uint8_t* &data, uint32_t &size)
 {
-    //no codec data;
-    static const string dummy;
-    return dummy;
+    data = NULL;
+    size = 0;
+    return false;
 }
 
 struct IvfHeader {
@@ -233,32 +238,34 @@ bool DecodeInputVPX::init()
         fprintf (stderr, "fail to read ivf header, quit\n");
         return false;
     }
-    if (header.tag != YAMI_FOURCC('D', 'K', 'I', 'F'))
+    if (header.tag != MY_FOURCC('D', 'K', 'I', 'F'))
         return false;
-    if (header.fourcc == YAMI_FOURCC('V', 'P', '8', '0'))
-        m_mimeType = YAMI_MIME_VP8;
-    else if (header.fourcc == YAMI_FOURCC('V', 'P', '9', '0'))
-        m_mimeType = YAMI_MIME_VP9;
+    if (header.fourcc == MY_FOURCC('V', 'P', '8', '0'))
+        m_mimeType = MY_MIME_VP8;
+    else if (header.fourcc == MY_FOURCC('V', 'P', '9', '0'))
+        m_mimeType = MY_MIME_VP9;
 
     setResolution(header.width, header.height);
 
     return true;
 }
 
-bool DecodeInputVPX::getNextDecodeUnit(VideoDecodeBuffer &inputBuffer)
+bool DecodeInputVPX::getNextDecodeUnit(uint8_t* &data, uint32_t &size, int64_t &timeStamp, uint32_t &flags)
 {
-    if(m_ivfFrmHdrSize == fread (m_buffer, 1, m_ivfFrmHdrSize, m_fp)) {
+    if((size_t)m_ivfFrmHdrSize == fread (m_buffer, 1, m_ivfFrmHdrSize, m_fp)) {
         int framesize = 0;
         framesize = (uint32_t)(m_buffer[0]) + ((uint32_t)(m_buffer[1])<<8) + ((uint32_t)(m_buffer[2])<<16);
         assert (framesize < (uint32_t) m_maxFrameSize);
         assert (framesize <= (uint32_t) CacheBufferSize);
 
-        if (framesize != fread (m_buffer, 1, framesize, m_fp)) {
+        if ((size_t)framesize != fread (m_buffer, 1, framesize, m_fp)) {
             fprintf (stderr, "fail to read frame data, quit\n");
             return false;
         }
-        inputBuffer.data = m_buffer;
-        inputBuffer.size = framesize;
+        data = m_buffer;
+        size = framesize;
+        timeStamp = 0;
+        flags = 0;
     }
     else {
         m_parseToEOS = true;
@@ -309,7 +316,7 @@ bool DecodeInputRaw::ensureBufferData()
     }
 
     readCount = fread(m_buffer + m_availableData, 1, CacheBufferSize-m_availableData, m_fp);
-    if (readCount < CacheBufferSize-m_availableData)
+    if ((uint32_t)readCount < CacheBufferSize-m_availableData)
         m_readToEOS = true;
 
     m_availableData += readCount;
@@ -334,16 +341,16 @@ int32_t DecodeInputRaw::scanForStartCode(const uint8_t * data,
     return -1;
 }
 
-bool DecodeInputRaw::getNextDecodeUnit(VideoDecodeBuffer &inputBuffer)
+bool DecodeInputRaw::getNextDecodeUnit(uint8_t* &data, uint32_t &size, int64_t &timeStamp, uint32_t &flags)
 {
     int32_t offset = -1;
-
+    static int sequence = 0;
     if(m_parseToEOS)
         return false;
 
     // parsing data for one NAL unit
     ensureBufferData();
-    DEBUG("m_lastReadOffset=0x%x, m_availableData=0x%x\n", m_lastReadOffset, m_availableData);
+    DEBUG("m_lastReadOffset=0x%x, m_availableData=0x%x", m_lastReadOffset, m_availableData);
     offset = scanForStartCode(m_buffer, m_lastReadOffset+StartCodeSize, m_availableData);
 
     if (offset == -1) {
@@ -352,14 +359,15 @@ bool DecodeInputRaw::getNextDecodeUnit(VideoDecodeBuffer &inputBuffer)
         m_parseToEOS = true;
     }
 
-    inputBuffer.data = m_buffer + m_lastReadOffset;
-    inputBuffer.size = offset;
-    inputBuffer.flag = IS_NAL_UNIT;
-    // inputBuffer.timeStamp = ; // ignore timestamp
+    data = m_buffer + m_lastReadOffset;
+    size = offset;
+    timeStamp = sequence++;
+    // FIXME
+    flags = 0; // IS_NAL_UNIT;
     if (!m_parseToEOS)
-       inputBuffer.size += StartCodeSize; // one inputBuffer is start and end with start code
+       size += StartCodeSize; // one inputBuffer is start and end with start code
 
-    DEBUG("offset=%d, NALU data=%p, size=%d\n", offset, inputBuffer.data, inputBuffer.size);
+    DEBUG("offset=%d, NALU data=%p, size=%d", offset, data, size);
     m_lastReadOffset += offset + StartCodeSize;
     return true;
 }
@@ -398,7 +406,7 @@ DecodeInputJPEG::~DecodeInputJPEG()
 
 const char *DecodeInputJPEG::getMimeType()
 {
-    return YAMI_MIME_JPEG;
+    return MY_MIME_JPEG;
 }
 
 bool DecodeInputJPEG::isSyncWord(const uint8_t* buf)

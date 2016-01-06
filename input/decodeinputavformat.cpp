@@ -24,9 +24,6 @@
 #endif
 
 #include "decodeinputavformat.h"
-#include "common/common_def.h"
-#include "common/log.h"
-#include "interface/VideoDecoderDefs.h"
 
 DecodeInputAvFormat::DecodeInputAvFormat()
 :m_format(NULL),m_videoId(-1), m_codecId(AV_CODEC_ID_NONE), m_isEos(true)
@@ -50,8 +47,10 @@ bool DecodeInputAvFormat::initInput(const char* fileName)
         AVCodecContext* ctx = m_format->streams[i]->codec;
         if (AVMEDIA_TYPE_VIDEO == ctx->codec_type) {
             m_codecId = ctx->codec_id;
-            if (ctx->extradata && ctx->extradata_size)
-                m_codecData.append((char*)ctx->extradata, ctx->extradata_size);
+            if (ctx->extradata && ctx->extradata_size) {
+                uint8_t *ptr = ctx->extradata;
+                m_codecData.assign(ptr, ptr+ctx->extradata_size);
+            }
             m_videoId = i;
             setResolution(ctx->coded_width, ctx->coded_height);
             break;
@@ -77,32 +76,31 @@ struct MimeEntry
 };
 
 static const MimeEntry MimeEntrys[] = {
-    AV_CODEC_ID_VP8, YAMI_MIME_VP8,
-
+    AV_CODEC_ID_VP8, MY_MIME_VP8,
 #if LIBAVCODEC_VERSION_INT > AV_VERSION_INT(54, 40, 0)
-    AV_CODEC_ID_VP9, YAMI_MIME_VP9,
+    AV_CODEC_ID_VP9, MY_MIME_VP9,
 #endif
-
-    AV_CODEC_ID_H264, YAMI_MIME_H264,
-    AV_CODEC_ID_H265, YAMI_MIME_H265
+    AV_CODEC_ID_H264, MY_MIME_H264,
+    // AV_CODEC_ID_H265, MY_MIME_H265
 };
 
 const char * DecodeInputAvFormat::getMimeType()
 {
-    for (int i = 0; i < N_ELEMENTS(MimeEntrys); i++) {
+    uint32_t i=0;
+    for (i = 0; i < sizeof(MimeEntrys)/sizeof(MimeEntrys[0]); i++) {
         if (MimeEntrys[i].id == m_codecId)
             return MimeEntrys[i].mime;
     }
     return "unknow";
 }
 
-bool DecodeInputAvFormat::getNextDecodeUnit(VideoDecodeBuffer &inputBuffer)
+bool DecodeInputAvFormat::getNextDecodeUnit(uint8_t* &data, uint32_t &size, int64_t &timeStamp, uint32_t &flags)
 {
     if (!m_format || m_isEos)
         return false;
     int ret;
     while (1) {
-        //free old packet
+        // FIXME, only one avpacket is used. free old packet
         av_packet_unref(&m_packet);
 
         ret = av_read_frame(m_format, &m_packet);
@@ -111,19 +109,27 @@ bool DecodeInputAvFormat::getNextDecodeUnit(VideoDecodeBuffer &inputBuffer)
             return false;
         }
         if (m_packet.stream_index == m_videoId) {
-            memset(&inputBuffer, 0, sizeof(inputBuffer));
-            inputBuffer.data = m_packet.data;
-            inputBuffer.size = m_packet.size;
-            inputBuffer.timeStamp = m_packet.dts;
+            data = m_packet.data;
+            size = m_packet.size;
+            timeStamp = m_packet.dts;
+            flags = 0;
             return true;
         }
     }
     return false;
 }
 
-const string& DecodeInputAvFormat::getCodecData()
+bool DecodeInputAvFormat::getCodecData(uint8_t* &data, uint32_t &size)
 {
-    return m_codecData;
+    if (m_codecData.empty()) {
+        data = NULL;
+        size = 0;
+        return false;
+    }
+
+    data = &m_codecData[0];
+    size = m_codecData.size();
+    return true;
 }
 
 DecodeInputAvFormat::~DecodeInputAvFormat()

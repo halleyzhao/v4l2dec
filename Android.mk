@@ -3,31 +3,26 @@ LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := \
-        decodeinput.cpp \
-        vppinputoutput.cpp \
-        v4l2decode.cpp
+        v4l2decode.cpp      \
+        util.cpp            \
+        input/decodeinput.cpp
 
 LOCAL_C_INCLUDES:= \
-        $(LOCAL_PATH)/.. \
+        $(LOCAL_PATH)/../avformat/ \
+        $(LOCAL_PATH)/../../../include/multimedia/ \
         external/libcxx/include \
-        $(LOCAL_PATH)/../interface \
         $(TARGET_OUT_HEADERS)/libva
 
 LOCAL_SHARED_LIBRARIES := \
-        libyami_v4l2 \
+        libdl    \
         libutils \
-        libgui \
-
-ifeq ($(ENABLE-V4L2-OPS),true)
-LOCAL_SHARED_LIBRARIES += libdl
-endif
+        liblog \
+        libc++ \
+        libgui
 
 LOCAL_CFLAGS := \
-         -O2 -fpermissive
+         -DV4L2CODEC_ANDROID_SURFACE    \
+         -O2
 
-ifeq ($(ENABLE-V4L2-OPS),true)
-LOCAL_CFLAGS += -D__ENABLE_V4L2_OPS__
-endif
-
-LOCAL_MODULE := v4l2decoder
+LOCAL_MODULE := v4l2dec
 include $(BUILD_EXECUTABLE)
